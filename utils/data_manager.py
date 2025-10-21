@@ -6,44 +6,43 @@ from utils.constants import DATA_DIR, LEADERBOARD_FILE, HALL_OF_FAME_FILE, CHALL
 class DataManager:
     def __init__(self):
         self.data_dir = DATA_DIR
-        self.leaderboard_file = LEADERBOARD_FILE
-        self.hall_of_fame_file = HALL_OF_FAME_FILE
-        self.challenges_file = CHALLENGES_FILE
-        
         os.makedirs(self.data_dir, exist_ok=True)
+        self.server_data = {}
+    
+    def _get_server_dir(self, guild_id: int) -> str:
+        server_dir = os.path.join(self.data_dir, f'server_{guild_id}')
+        os.makedirs(server_dir, exist_ok=True)
+        return server_dir
+    
+    def _load_server_data(self, guild_id: int, filename: str):
+        server_dir = self._get_server_dir(guild_id)
+        filepath = os.path.join(server_dir, filename)
         
-        self.leaderboard = self._load_data(self.leaderboard_file)
-        self.hall_of_fame = self._load_data(self.hall_of_fame_file)
-        self.challenges = self._load_data(self.challenges_file)
-        
-        # Fix for challenges file - should be a list not dict
-        if isinstance(self.challenges, dict):
-            self.challenges = []
-        
-        # Initialize tickets list in leaderboard if not exists
-        if 'tickets' not in self.leaderboard:
-            self.leaderboard['tickets'] = []
-
-    def _load_data(self, filename):
-        filepath = os.path.join(self.data_dir, filename)
         if os.path.exists(filepath):
             with open(filepath, 'r') as f:
                 return json.load(f)
-        return {} if filename != self.challenges_file else []
-
-    def _save_data(self, filename, data):
-        filepath = os.path.join(self.data_dir, filename)
+        
+        if filename == CHALLENGES_FILE:
+            return []
+        return {}
+    
+    def _save_server_data(self, guild_id: int, filename: str, data):
+        server_dir = self._get_server_dir(guild_id)
+        filepath = os.path.join(server_dir, filename)
+        
         with open(filepath, 'w') as f:
             json.dump(data, f, indent=4)
-
+    
     def get_month_key(self):
         now = datetime.now()
         return f"{now.year}-{now.month:02d}"
-
-    def ensure_user(self, user_id, username):
+    
+    def ensure_user(self, guild_id: int, user_id: int, username: str):
+        leaderboard = self._load_server_data(guild_id, LEADERBOARD_FILE)
         user_id = str(user_id)
-        if user_id not in self.leaderboard:
-            self.leaderboard[user_id] = {
+        
+        if user_id not in leaderboard:
+            leaderboard[user_id] = {
                 'username': username,
                 'xp': 0,
                 'weekly_xp': {},
@@ -51,152 +50,170 @@ class DataManager:
                 'badges': []
             }
         else:
-            self.leaderboard[user_id]['username'] = username
-        self._save_data(self.leaderboard_file, self.leaderboard)
-
-    def add_xp(self, user_id, amount, week_key):
-        user_id = str(user_id)
-        self.leaderboard[user_id]['xp'] += amount
-        self.leaderboard[user_id]['total_xp'] += amount
+            leaderboard[user_id]['username'] = username
         
-        if week_key not in self.leaderboard[user_id]['weekly_xp']:
-            self.leaderboard[user_id]['weekly_xp'][week_key] = 0
-        self.leaderboard[user_id]['weekly_xp'][week_key] += amount
+        self._save_server_data(guild_id, LEADERBOARD_FILE, leaderboard)
+    
+    def add_xp(self, guild_id: int, user_id: int, amount: int, week_key: str):
+        leaderboard = self._load_server_data(guild_id, LEADERBOARD_FILE)
+        user_id = str(user_id)
         
-        self._save_data(self.leaderboard_file, self.leaderboard)
-
-    def remove_xp(self, user_id, amount):
+        leaderboard[user_id]['xp'] += amount
+        leaderboard[user_id]['total_xp'] += amount
+        
+        if week_key not in leaderboard[user_id]['weekly_xp']:
+            leaderboard[user_id]['weekly_xp'][week_key] = 0
+        leaderboard[user_id]['weekly_xp'][week_key] += amount
+        
+        self._save_server_data(guild_id, LEADERBOARD_FILE, leaderboard)
+    
+    def remove_xp(self, guild_id: int, user_id: int, amount: int):
+        leaderboard = self._load_server_data(guild_id, LEADERBOARD_FILE)
         user_id = str(user_id)
-        self.leaderboard[user_id]['xp'] = max(0, self.leaderboard[user_id]['xp'] - amount)
-        self._save_data(self.leaderboard_file, self.leaderboard)
-
-    def add_badge(self, user_id, badge):
+        
+        if user_id in leaderboard:
+            leaderboard[user_id]['xp'] = max(0, leaderboard[user_id]['xp'] - amount)
+            self._save_server_data(guild_id, LEADERBOARD_FILE, leaderboard)
+    
+    def add_badge(self, guild_id: int, user_id: int, badge: str):
+        leaderboard = self._load_server_data(guild_id, LEADERBOARD_FILE)
         user_id = str(user_id)
-        if 'badges' not in self.leaderboard[user_id]:
-            self.leaderboard[user_id]['badges'] = []
-        if badge not in self.leaderboard[user_id]['badges']:
-            self.leaderboard[user_id]['badges'].append(badge)
-        self._save_data(self.leaderboard_file, self.leaderboard)
-
-    def get_user(self, user_id):
-        return self.leaderboard.get(str(user_id))
-
-    def get_leaderboard(self):
-        # Return only user data, not tickets
-        return {k: v for k, v in self.leaderboard.items() if k != 'tickets'}
-
-    def get_hall_of_fame(self):
-        return self.hall_of_fame
-
-    def get_user_rank(self, user_id):
-        leaderboard_data = self.get_leaderboard()
+        
+        if user_id in leaderboard:
+            if 'badges' not in leaderboard[user_id]:
+                leaderboard[user_id]['badges'] = []
+            if badge not in leaderboard[user_id]['badges']:
+                leaderboard[user_id]['badges'].append(badge)
+            self._save_server_data(guild_id, LEADERBOARD_FILE, leaderboard)
+    
+    def get_user(self, guild_id: int, user_id: int):
+        leaderboard = self._load_server_data(guild_id, LEADERBOARD_FILE)
+        return leaderboard.get(str(user_id))
+    
+    def get_leaderboard(self, guild_id: int):
+        leaderboard = self._load_server_data(guild_id, LEADERBOARD_FILE)
+        return {k: v for k, v in leaderboard.items() if k != 'tickets'}
+    
+    def get_user_rank(self, guild_id: int, user_id: int):
+        leaderboard_data = self.get_leaderboard(guild_id)
         sorted_users = sorted(leaderboard_data.items(), key=lambda x: x[1]['xp'], reverse=True)
         rank = next((i + 1 for i, (uid, _) in enumerate(sorted_users) if uid == str(user_id)), 0)
         return rank
-
-    def reset_monthly_leaderboard(self):
+    
+    def get_user_streak(self, guild_id: int, user_id: int):
+        user = self.get_user(guild_id, user_id)
+        if not user:
+            return 0
+        return len(user.get('weekly_xp', {}))
+    
+    def get_hall_of_fame(self, guild_id: int):
+        return self._load_server_data(guild_id, HALL_OF_FAME_FILE)
+    
+    def reset_monthly_leaderboard(self, guild_id: int):
         month_key = self.get_month_key()
+        leaderboard = self._load_server_data(guild_id, LEADERBOARD_FILE)
+        hall_of_fame = self._load_server_data(guild_id, HALL_OF_FAME_FILE)
         
-        # Get only user data for hall of fame
-        leaderboard_data = self.get_leaderboard()
-        self.hall_of_fame[month_key] = dict(leaderboard_data)
-        self._save_data(self.hall_of_fame_file, self.hall_of_fame)
+        leaderboard_data = {k: v for k, v in leaderboard.items() if k != 'tickets'}
+        hall_of_fame[month_key] = dict(leaderboard_data)
+        self._save_server_data(guild_id, HALL_OF_FAME_FILE, hall_of_fame)
         
-        # Reset monthly XP but keep total XP and tickets
         for user_id in leaderboard_data:
-            self.leaderboard[user_id]['xp'] = 0
+            leaderboard[user_id]['xp'] = 0
         
-        self._save_data(self.leaderboard_file, self.leaderboard)
-
-    # Challenge management
-    def create_challenge(self, challenge_data):
-        """Create a new challenge"""
-        challenge_id = len(self.challenges) + 1
+        self._save_server_data(guild_id, LEADERBOARD_FILE, leaderboard)
+    
+    def create_challenge(self, guild_id: int, challenge_data: dict):
+        challenges = self._load_server_data(guild_id, CHALLENGES_FILE)
+        challenge_id = len(challenges) + 1
         challenge_data['id'] = challenge_id
-        self.challenges.append(challenge_data)
-        self._save_data(self.challenges_file, self.challenges)
+        challenge_data['guild_id'] = guild_id
+        challenges.append(challenge_data)
+        self._save_server_data(guild_id, CHALLENGES_FILE, challenges)
         return challenge_id
-
-    def update_challenge(self, challenge_id, updates):
-        """Update an existing challenge"""
-        for challenge in self.challenges:
+    
+    def update_challenge(self, guild_id: int, challenge_id: int, updates: dict):
+        challenges = self._load_server_data(guild_id, CHALLENGES_FILE)
+        for challenge in challenges:
             if challenge['id'] == challenge_id:
                 challenge.update(updates)
-                self._save_data(self.challenges_file, self.challenges)
+                self._save_server_data(guild_id, CHALLENGES_FILE, challenges)
                 return True
         return False
-
-    def get_active_challenge(self):
-        """Get the current active challenge"""
-        for challenge in reversed(self.challenges):
+    
+    def get_active_challenge(self, guild_id: int):
+        challenges = self._load_server_data(guild_id, CHALLENGES_FILE)
+        for challenge in reversed(challenges):
             if challenge.get('status') == 'active':
                 return challenge
         return None
-
-    def get_latest_challenge(self):
-        """Get the most recent challenge"""
-        return self.challenges[-1] if self.challenges else None
-
-    def add_submission(self, challenge_id, submission_data):
-        """Add a submission to a challenge"""
-        for challenge in self.challenges:
+    
+    def get_latest_challenge(self, guild_id: int):
+        challenges = self._load_server_data(guild_id, CHALLENGES_FILE)
+        return challenges[-1] if challenges else None
+    
+    def get_challenge_by_id(self, guild_id: int, challenge_id: int):
+        challenges = self._load_server_data(guild_id, CHALLENGES_FILE)
+        for challenge in challenges:
+            if challenge['id'] == challenge_id:
+                return challenge
+        return None
+    
+    def add_submission(self, guild_id: int, challenge_id: int, submission_data: dict):
+        challenges = self._load_server_data(guild_id, CHALLENGES_FILE)
+        for challenge in challenges:
             if challenge['id'] == challenge_id:
                 if 'submissions' not in challenge:
                     challenge['submissions'] = []
                 challenge['submissions'].append(submission_data)
-                self._save_data(self.challenges_file, self.challenges)
+                self._save_server_data(guild_id, CHALLENGES_FILE, challenges)
                 return True
         return False
-
-    # Ticket management
-    def create_ticket(self, ticket_data):
-        """Create a new ticket"""
-        if 'tickets' not in self.leaderboard:
-            self.leaderboard['tickets'] = []
-        
-        ticket_id = len(self.leaderboard['tickets']) + 1
+    
+    def create_ticket(self, guild_id: int, ticket_data: dict):
+        leaderboard = self._load_server_data(guild_id, LEADERBOARD_FILE)
+        if 'tickets' not in leaderboard:
+            leaderboard['tickets'] = []
+        ticket_id = len(leaderboard['tickets']) + 1
         ticket_data['id'] = ticket_id
-        self.leaderboard['tickets'].append(ticket_data)
-        self._save_data(self.leaderboard_file, self.leaderboard)
+        ticket_data['guild_id'] = guild_id
+        leaderboard['tickets'].append(ticket_data)
+        self._save_server_data(guild_id, LEADERBOARD_FILE, leaderboard)
         return ticket_id
-
-    def update_ticket(self, ticket_id, updates):
-        """Update an existing ticket"""
-        if 'tickets' not in self.leaderboard:
+    
+    def update_ticket(self, guild_id: int, ticket_id: int, updates: dict):
+        leaderboard = self._load_server_data(guild_id, LEADERBOARD_FILE)
+        if 'tickets' not in leaderboard:
             return False
-        
-        for ticket in self.leaderboard['tickets']:
+        for ticket in leaderboard['tickets']:
             if ticket['id'] == ticket_id:
                 ticket.update(updates)
-                self._save_data(self.leaderboard_file, self.leaderboard)
+                self._save_server_data(guild_id, LEADERBOARD_FILE, leaderboard)
                 return True
         return False
-
-    def get_user_ticket(self, user_id, challenge_id):
-        """Get a user's ticket for a specific challenge"""
-        if 'tickets' not in self.leaderboard:
+    
+    def get_user_ticket(self, guild_id: int, user_id: int, challenge_id: int):
+        leaderboard = self._load_server_data(guild_id, LEADERBOARD_FILE)
+        if 'tickets' not in leaderboard:
             return None
-        
-        for ticket in self.leaderboard['tickets']:
+        for ticket in leaderboard['tickets']:
             if (ticket['user_id'] == user_id and 
                 ticket['challenge_id'] == challenge_id and 
                 ticket['status'] == 'open'):
                 return ticket
         return None
-
-    def get_ticket_by_channel(self, channel_id):
-        """Get ticket by channel ID"""
-        if 'tickets' not in self.leaderboard:
+    
+    def get_ticket_by_channel(self, guild_id: int, channel_id: int):
+        leaderboard = self._load_server_data(guild_id, LEADERBOARD_FILE)
+        if 'tickets' not in leaderboard:
             return None
-        
-        for ticket in self.leaderboard['tickets']:
+        for ticket in leaderboard['tickets']:
             if ticket['channel_id'] == channel_id:
                 return ticket
         return None
-
-    def get_tickets_by_challenge(self, challenge_id):
-        """Get all tickets for a specific challenge"""
-        if 'tickets' not in self.leaderboard:
+    
+    def get_tickets_by_challenge(self, guild_id: int, challenge_id: int):
+        leaderboard = self._load_server_data(guild_id, LEADERBOARD_FILE)
+        if 'tickets' not in leaderboard:
             return []
-        
-        return [t for t in self.leaderboard['tickets'] if t['challenge_id'] == challenge_id]
+        return [t for t in leaderboard['tickets'] if t['challenge_id'] == challenge_id]

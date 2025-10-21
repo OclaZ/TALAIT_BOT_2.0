@@ -18,12 +18,12 @@ class Tickets(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         
         try:
-            active_challenge = self.data_manager.get_active_challenge()
+            active_challenge = self.data_manager.get_active_challenge(interaction.guild.id)
             if not active_challenge:
                 await interaction.followup.send('❌ No active challenge!', ephemeral=True)
                 return
 
-            existing_ticket = self.data_manager.get_user_ticket(interaction.user.id, active_challenge['id'])
+            existing_ticket = self.data_manager.get_user_ticket(interaction.guild.id, interaction.user.id, active_challenge['id'])
             if existing_ticket:
                 channel = interaction.guild.get_channel(existing_ticket['channel_id'])
                 if channel:
@@ -40,36 +40,18 @@ class Tickets(commands.Cog):
 
             overwrites = {
                 interaction.guild.default_role: discord.PermissionOverwrite(read_messages=False),
-                interaction.user: discord.PermissionOverwrite(
-                    read_messages=True,
-                    send_messages=True,
-                    attach_files=True,
-                    embed_links=True,
-                    read_message_history=True
-                ),
-                interaction.guild.me: discord.PermissionOverwrite(
-                    read_messages=True, 
-                    send_messages=True,
-                    manage_channels=True
-                )
+                interaction.user: discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=True, embed_links=True, read_message_history=True),
+                interaction.guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True)
             }
 
             for role in [trainer_role, admin_role, moderator_role]:
                 if role:
-                    overwrites[role] = discord.PermissionOverwrite(
-                        read_messages=True,
-                        send_messages=True,
-                        read_message_history=True
-                    )
+                    overwrites[role] = discord.PermissionOverwrite(read_messages=True, send_messages=True, read_message_history=True)
 
             week_num = active_challenge['week']
             channel_name = f"ticket-{interaction.user.name}-w{week_num}".lower().replace(" ", "-")
             
-            ticket_channel = await interaction.guild.create_text_channel(
-                name=channel_name,
-                category=category,
-                overwrites=overwrites
-            )
+            ticket_channel = await interaction.guild.create_text_channel(name=channel_name, category=category, overwrites=overwrites)
 
             ticket_data = {
                 'user_id': interaction.user.id,
@@ -79,7 +61,7 @@ class Tickets(commands.Cog):
                 'status': 'open',
                 'submitted': False
             }
-            self.data_manager.create_ticket(ticket_data)
+            self.data_manager.create_ticket(interaction.guild.id, ticket_data)
 
             embed = discord.Embed(
                 title=f'🎯 Submission Ticket - {active_challenge["title"]}',
@@ -102,9 +84,9 @@ class Tickets(commands.Cog):
                 ),
                 color=discord.Color.blue()
             )
-            embed.set_footer(text='Good luck! 🚀')
+            embed.set_footer(text=f'{interaction.guild.name} • Good luck! 🚀')
 
-            view = SubmitView(self.data_manager, active_challenge['id'])
+            view = SubmitView(self.data_manager, active_challenge['id'], interaction.guild.id)
             await ticket_channel.send(embed=embed, view=view)
 
             await interaction.followup.send(f'✅ Created ticket: {ticket_channel.mention}', ephemeral=True)
@@ -121,7 +103,7 @@ class Tickets(commands.Cog):
             await interaction.response.send_message('❌ Use in ticket channels only!', ephemeral=True)
             return
 
-        ticket = self.data_manager.get_ticket_by_channel(interaction.channel.id)
+        ticket = self.data_manager.get_ticket_by_channel(interaction.guild.id, interaction.channel.id)
         if not ticket:
             await interaction.response.send_message('❌ Ticket not found!', ephemeral=True)
             return
@@ -130,10 +112,10 @@ class Tickets(commands.Cog):
         is_trainer = any(role.name.lower() in ALLOWED_ROLES for role in interaction.user.roles)
 
         if not (is_owner or is_trainer):
-            await interaction.response.send_message('❌ You can only close your own ticket!', ephemeral=True)
+            await interaction.response.send_message('❌ Only your ticket!', ephemeral=True)
             return
 
-        view = CloseConfirmView(interaction.channel, ticket['id'], self.data_manager)
+        view = CloseConfirmView(interaction.channel, ticket['id'], self.data_manager, interaction.guild.id)
         await interaction.response.send_message('🔒 Close this ticket?', view=view, ephemeral=True)
 
     @app_commands.command(name='listtickets', description='List all tickets (Trainers)')
@@ -142,22 +124,18 @@ class Tickets(commands.Cog):
             await interaction.response.send_message('❌ Trainers only!', ephemeral=True)
             return
 
-        active_challenge = self.data_manager.get_active_challenge()
+        active_challenge = self.data_manager.get_active_challenge(interaction.guild.id)
         if not active_challenge:
             await interaction.response.send_message('❌ No active challenge!', ephemeral=True)
             return
 
-        tickets = self.data_manager.get_tickets_by_challenge(active_challenge['id'])
+        tickets = self.data_manager.get_tickets_by_challenge(interaction.guild.id, active_challenge['id'])
         
         if not tickets:
             await interaction.response.send_message('📋 No tickets yet!', ephemeral=True)
             return
 
-        embed = discord.Embed(
-            title=f'📋 Tickets - Week {active_challenge["week"]}',
-            description=f'Total: **{len(tickets)}**',
-            color=discord.Color.blue()
-        )
+        embed = discord.Embed(title=f'📋 Tickets - Week {active_challenge["week"]}', description=f'Total: **{len(tickets)}**', color=discord.Color.blue())
 
         submitted = len([t for t in tickets if t['submitted']])
         embed.add_field(name='Stats', value=f'✅ Submitted: {submitted}\n⏳ Pending: {len(tickets) - submitted}', inline=False)
@@ -172,6 +150,7 @@ class Tickets(commands.Cog):
             except:
                 continue
 
+        embed.set_footer(text=interaction.guild.name)
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @app_commands.command(name='feedback', description='Give feedback (Trainers)')
@@ -185,7 +164,7 @@ class Tickets(commands.Cog):
             await interaction.response.send_message('❌ Use in ticket!', ephemeral=True)
             return
 
-        ticket = self.data_manager.get_ticket_by_channel(interaction.channel.id)
+        ticket = self.data_manager.get_ticket_by_channel(interaction.guild.id, interaction.channel.id)
         if not ticket:
             await interaction.response.send_message('❌ Ticket not found!', ephemeral=True)
             return
@@ -201,10 +180,11 @@ class Tickets(commands.Cog):
 
 
 class SubmitView(discord.ui.View):
-    def __init__(self, data_manager, challenge_id):
+    def __init__(self, data_manager, challenge_id, guild_id):
         super().__init__(timeout=None)
         self.data_manager = data_manager
         self.challenge_id = challenge_id
+        self.guild_id = guild_id
         self.code_analyzer = CodeAnalyzer()
         self.xp_calculator = AutoXPCalculator()
         self.ai_verifier = AIVerifier()
@@ -213,7 +193,7 @@ class SubmitView(discord.ui.View):
     async def submit_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer()
         
-        ticket = self.data_manager.get_ticket_by_channel(interaction.channel.id)
+        ticket = self.data_manager.get_ticket_by_channel(self.guild_id, interaction.channel.id)
         
         if not ticket:
             await interaction.followup.send('❌ Ticket not found!', ephemeral=True)
@@ -238,12 +218,11 @@ class SubmitView(discord.ui.View):
         language = self._detect_language(code_content)
         analysis = self.code_analyzer.analyze(code_content, language)
         
-        challenge = self.data_manager.get_active_challenge()
+        challenge = self.data_manager.get_active_challenge(self.guild_id)
         if not challenge:
             await interaction.followup.send('❌ Challenge not found!', ephemeral=True)
             return
         
-        # AI VERIFICATION
         ai_result = self.ai_verifier.verify_solution(
             challenge_title=challenge['title'],
             challenge_description=challenge['description'],
@@ -268,10 +247,10 @@ class SubmitView(discord.ui.View):
         print(f"⭐ XP: {xp_result['total_xp']}")
         
         week_key = f"week_{challenge['week']}"
-        self.data_manager.ensure_user(interaction.user.id, interaction.user.name)
-        self.data_manager.add_xp(interaction.user.id, xp_result['total_xp'], week_key)
+        self.data_manager.ensure_user(self.guild_id, interaction.user.id, interaction.user.name)
+        self.data_manager.add_xp(self.guild_id, interaction.user.id, xp_result['total_xp'], week_key)
         
-        self.data_manager.update_ticket(ticket['id'], {
+        self.data_manager.update_ticket(self.guild_id, ticket['id'], {
             'submitted': True,
             'quality_score': ai_result['overall_score'],
             'xp_awarded': xp_result['total_xp']
@@ -286,18 +265,12 @@ class SubmitView(discord.ui.View):
             'xp_awarded': xp_result['total_xp'],
             'solves_challenge': ai_result['solves_challenge']
         }
-        self.data_manager.add_submission(self.challenge_id, submission_data)
+        self.data_manager.add_submission(self.guild_id, self.challenge_id, submission_data)
         
-        # CREATE EMBED
         color = discord.Color.green() if ai_result['solves_challenge'] else discord.Color.red()
         
-        embed = discord.Embed(
-            title='🤖 AI Code Review Complete!',
-            description=f'Your {language} solution has been analyzed',
-            color=color
-        )
+        embed = discord.Embed(title='🤖 AI Code Review Complete!', description=f'Your {language} solution has been analyzed', color=color)
         
-        # Challenge verification
         challenge_emoji = '✅' if ai_result['solves_challenge'] else '❌'
         embed.add_field(
             name=f'{challenge_emoji} Challenge Verification',
@@ -311,22 +284,18 @@ class SubmitView(discord.ui.View):
             inline=False
         )
         
-        # AI Feedback
         if ai_result['feedback']:
             feedback_text = ai_result['feedback'][:400]
             embed.add_field(name='💬 AI Feedback', value=feedback_text, inline=False)
         
-        # Issues
         if ai_result['issues']:
             issues_text = '\n'.join(f"• {issue}" for issue in ai_result['issues'][:3])
             embed.add_field(name='⚠️ Issues', value=issues_text, inline=False)
         
-        # Strengths
         if ai_result['strengths']:
             strengths_text = '\n'.join(f"• {strength}" for strength in ai_result['strengths'][:3])
             embed.add_field(name='💪 Strengths', value=strengths_text, inline=False)
         
-        # Code quality
         quality_bar = self._progress_bar(analysis['overall'])
         embed.add_field(
             name='📊 Code Quality',
@@ -339,7 +308,6 @@ class SubmitView(discord.ui.View):
             inline=False
         )
         
-        # XP
         xp_emoji = '🌟' if xp_result['total_xp'] >= 8 else '⭐' if xp_result['total_xp'] >= 5 else '💧'
         embed.add_field(
             name=f'{xp_emoji} XP Awarded: **{xp_result["total_xp"]} XP**',
@@ -347,7 +315,7 @@ class SubmitView(discord.ui.View):
             inline=False
         )
         
-        embed.set_footer(text=f'Submission #{submission_rank} • Reviewed by AI')
+        embed.set_footer(text=f'{interaction.guild.name} • Submission #{submission_rank}')
         embed.timestamp = datetime.now()
         
         await interaction.followup.send(embed=embed)
@@ -356,7 +324,7 @@ class SubmitView(discord.ui.View):
         button.label = 'Submitted ✅'
         await interaction.message.edit(view=self)
         
-        print(f'✅ Complete for {interaction.user.name}')
+        print(f'✅ Complete for {interaction.user.name} in {interaction.guild.name}')
     
     async def _extract_code(self, channel) -> str:
         code_blocks = []
@@ -403,15 +371,16 @@ class SubmitView(discord.ui.View):
 
 
 class CloseConfirmView(discord.ui.View):
-    def __init__(self, channel, ticket_id, data_manager):
+    def __init__(self, channel, ticket_id, data_manager, guild_id):
         super().__init__(timeout=60)
         self.channel = channel
         self.ticket_id = ticket_id
         self.data_manager = data_manager
+        self.guild_id = guild_id
 
     @discord.ui.button(label='Yes, Close', style=discord.ButtonStyle.red)
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.data_manager.update_ticket(self.ticket_id, {'status': 'closed'})
+        self.data_manager.update_ticket(self.guild_id, self.ticket_id, {'status': 'closed'})
         await interaction.response.send_message('🔒 Closing...', ephemeral=True)
         import asyncio
         await asyncio.sleep(3)
@@ -423,6 +392,5 @@ class CloseConfirmView(discord.ui.View):
         await interaction.message.delete()
 
 
-# THIS IS CRITICAL - DO NOT FORGET THIS FUNCTION!
 async def setup(bot):
     await bot.add_cog(Tickets(bot))
