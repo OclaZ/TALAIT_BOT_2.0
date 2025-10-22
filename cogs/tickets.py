@@ -349,15 +349,67 @@ class SubmitView(discord.ui.View):
         return '\n\n'.join(code_blocks)
     
     def _detect_language(self, code: str) -> str:
-        if 'def ' in code or 'import ' in code:
+        """Enhanced language detection"""
+        code_lower = code.lower()
+        
+        # Python
+        if 'def ' in code or 'import ' in code or 'print(' in code:
             return 'python'
-        elif 'public class' in code:
+        
+        # Java
+        if 'public class' in code or 'public static void main' in code:
             return 'java'
-        elif '#include' in code:
+        
+        # C++
+        if '#include' in code and ('std::' in code or 'cout' in code or 'cin' in code):
             return 'cpp'
-        elif 'function ' in code or 'const ' in code:
+        
+        # C
+        if '#include' in code and ('printf' in code or 'scanf' in code):
+            return 'c'
+        
+        # C#
+        if 'using System' in code or 'namespace ' in code:
+            return 'csharp'
+        
+        # JavaScript/TypeScript
+        if ('function ' in code or 'const ' in code or 'let ' in code or 
+            'console.log' in code or '=>' in code):
+            if 'interface ' in code or ': string' in code or ': number' in code:
+                return 'typescript'
             return 'javascript'
+        
+        # Go
+        if 'package main' in code or 'func main()' in code or 'import "fmt"' in code:
+            return 'go'
+        
+        # Rust
+        if 'fn main()' in code or 'println!' in code or 'use std::' in code:
+            return 'rust'
+        
+        # PHP
+        if '<?php' in code or '$_' in code:
+            return 'php'
+        
+        # Ruby
+        if 'puts ' in code or 'def ' in code and 'end' in code:
+            return 'ruby'
+        
+        # Swift
+        if 'import Foundation' in code or 'var ' in code and ': String' in code:
+            return 'swift'
+        
+        # Kotlin
+        if 'fun main()' in code or 'val ' in code:
+            return 'kotlin'
+        
+        # SQL
+        if any(keyword in code_lower for keyword in ['select ', 'insert ', 'update ', 'delete ', 'create table']):
+            return 'sql'
+        
+        # Default to python
         return 'python'
+        
     
     def _progress_bar(self, score: int) -> str:
         filled = int((score / 100) * 10)

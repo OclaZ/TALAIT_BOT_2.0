@@ -1,15 +1,14 @@
 import re
 import ast
 from typing import Dict, List
+from utils.constants import SUPPORTED_LANGUAGES
 
 class CodeAnalyzer:
     def __init__(self):
         self.max_line_length = 100
     
     def analyze(self, code: str, language: str = 'python') -> Dict:
-        """
-        Analyze code quality and return metrics
-        """
+        """Analyze code quality for any language"""
         
         if not code or len(code.strip()) < 5:
             return {
@@ -22,14 +21,17 @@ class CodeAnalyzer:
                 'has_errors': True
             }
         
-        if language.lower() == 'python':
+        language = language.lower()
+        
+        # Python-specific analysis
+        if language in ['python', 'py']:
             return self._analyze_python(code)
-        else:
-            return self._analyze_generic(code)
+        
+        # Generic analysis for all other languages
+        return self._analyze_generic(code, language)
     
     def _analyze_python(self, code: str) -> Dict:
-        """Analyze Python code"""
-        
+        """Detailed Python analysis"""
         metrics = {
             'correctness': 0,
             'readability': 0,
@@ -43,7 +45,7 @@ class CodeAnalyzer:
         lines = code.split('\n')
         metrics['line_count'] = len([l for l in lines if l.strip()])
         
-        # 1. CORRECTNESS
+        # Correctness check
         try:
             ast.parse(code)
             metrics['correctness'] = 100
@@ -53,28 +55,20 @@ class CodeAnalyzer:
             metrics['suggestions'].append(f'❌ Syntax Error: {e.msg}')
             metrics['overall'] = 0
             return metrics
-        except Exception as e:
+        except:
             metrics['correctness'] = 50
-            metrics['suggestions'].append(f'⚠️ Code issue: {str(e)}')
         
-        # 2. READABILITY
+        # Readability
         readability_score = 100
-        
         comment_count = len([l for l in lines if l.strip().startswith('#')])
         if metrics['line_count'] > 15 and comment_count < 3:
             readability_score -= 10
             metrics['suggestions'].append('💬 Add more comments')
         
-        short_vars = len(re.findall(r'\b([a-z])\s*=', code))
-        if short_vars > 5:
-            readability_score -= 10
-            metrics['suggestions'].append('📝 Use descriptive variable names')
-        
         metrics['readability'] = max(0, readability_score)
         
-        # 3. EFFICIENCY
+        # Efficiency
         efficiency_score = 100
-        
         nested_loops = code.count('for') + code.count('while')
         if nested_loops > 3:
             efficiency_score -= 15
@@ -82,7 +76,7 @@ class CodeAnalyzer:
         
         metrics['efficiency'] = max(0, efficiency_score)
         
-        # 4. OVERALL
+        # Overall
         metrics['overall'] = int(
             metrics['correctness'] * 0.50 +
             metrics['readability'] * 0.30 +
@@ -96,16 +90,45 @@ class CodeAnalyzer:
         
         return metrics
     
-    def _analyze_generic(self, code: str) -> Dict:
-        """Generic analysis"""
+    def _analyze_generic(self, code: str, language: str) -> Dict:
+        """Generic analysis for all languages"""
         lines = [l for l in code.split('\n') if l.strip()]
+        
+        suggestions = []
+        readability = 85
+        
+        # Get language info
+        lang_info = SUPPORTED_LANGUAGES.get(language, SUPPORTED_LANGUAGES.get('any'))
+        
+        # Check for comments (works for most languages)
+        comment_chars = ['#', '//', '/*', '*', '--']
+        has_comments = any(any(char in line for char in comment_chars) for line in lines)
+        
+        if not has_comments and len(lines) > 10:
+            suggestions.append(f'💬 Add comments ({lang_info["name"]})')
+            readability -= 15
+        
+        # Check line length
+        long_lines = len([l for l in lines if len(l) > 120])
+        if long_lines > 0:
+            suggestions.append(f'📏 {long_lines} lines are too long')
+            readability -= 10
+        
+        # Language-specific checks
+        if language in ['java', 'csharp', 'cpp']:
+            if not any('{' in line for line in lines):
+                readability -= 20
+                suggestions.append('⚠️ Code structure looks incomplete')
+        
+        if not suggestions:
+            suggestions.append(f'✅ {lang_info["name"]} code looks good!')
         
         return {
             'correctness': 85,
-            'readability': 80,
-            'efficiency': 75,
-            'overall': 80,
-            'suggestions': ['✅ Code looks good!'],
+            'readability': max(0, readability),
+            'efficiency': 80,
+            'overall': 83,
+            'suggestions': suggestions,
             'line_count': len(lines),
             'has_errors': False
         }

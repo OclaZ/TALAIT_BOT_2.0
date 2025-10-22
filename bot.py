@@ -76,6 +76,7 @@ async def load_cogs():
         'cogs.admin',
         'cogs.tickets',
         'cogs.challenges',
+        'cogs.pomodoro',
     ]
     
     print('🔄 Loading cogs...')
