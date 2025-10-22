@@ -19,6 +19,8 @@ class PomodoroTimer:
         self.task = None
         self.end_time = None
         self.paused_time_left = None
+        self.status_message = None
+        self.status_message_channel = None
         
     def start_work(self):
         self.is_running = True
@@ -53,6 +55,7 @@ class PomodoroTimer:
         self.is_running = False
         self.is_break = False
         self.paused_time_left = None
+        self.end_time = None
         
     def reset_sessions(self):
         self.current_session = 0
@@ -86,8 +89,13 @@ class Pomodoro(commands.Cog):
         timer = PomodoroTimer(user_id, guild_id)
         self.active_timers[key] = timer
         return timer
+    
+    def _remove_timer(self, user_id: int, guild_id: int):
+        key = self._get_timer_key(user_id, guild_id)
+        if key in self.active_timers:
+            del self.active_timers[key]
 
-    @app_commands.command(name='pomodoro', description='Start a Pomodoro timer')
+    @app_commands.command(name='pomodoro', description='Start a Pomodoro timer with live updates')
     @app_commands.describe(
         work='Work duration in minutes (default: 25)',
         short_break='Short break duration (default: 5)',
@@ -142,9 +150,15 @@ class Pomodoro(commands.Cog):
         embed.add_field(name='🌙 Long Break', value=f'{long_break} minutes', inline=True)
         embed.add_field(name='🔄 Sessions Until Long', value=f'{sessions}', inline=True)
         embed.add_field(name='📍 Current Session', value=f'#{timer.current_session}', inline=True)
-        embed.set_footer(text='Stay focused! I\'ll notify you when time is up.')
+        embed.set_footer(text='Stay focused! Live timer below...')
         
         await interaction.response.send_message(embed=embed)
+        
+        # Create live timer message
+        timer_embed = self._create_timer_embed(timer, interaction.user)
+        timer_message = await interaction.channel.send(embed=timer_embed)
+        timer.status_message = timer_message
+        timer.status_message_channel = interaction.channel
         
         # Start timer loop
         asyncio.create_task(self._run_timer(interaction.user, interaction.guild, timer))
@@ -222,7 +236,7 @@ class Pomodoro(commands.Cog):
         else:
             await interaction.response.send_message('❌ Timer is not paused!', ephemeral=True)
 
-    @app_commands.command(name='pomodoro-stop', description='Stop your Pomodoro timer')
+    @app_commands.command(name='pomodoro-stop', description='Stop your Pomodoro timer completely')
     async def pomodoro_stop(self, interaction: discord.Interaction):
         timer = self._get_timer(interaction.user.id, interaction.guild.id)
         
@@ -231,11 +245,20 @@ class Pomodoro(commands.Cog):
             return
             
         sessions_completed = timer.current_session
-        timer.stop()
+        
+        # Delete live timer message if it exists
+        if timer.status_message:
+            try:
+                await timer.status_message.delete()
+            except:
+                pass
+        
+        # Remove timer completely
+        self._remove_timer(interaction.user.id, interaction.guild.id)
         
         embed = discord.Embed(
             title='🛑 Pomodoro Stopped',
-            description=f'Great work! You completed **{sessions_completed}** session(s).',
+            description=f'Timer stopped. You completed **{sessions_completed}** session(s).',
             color=discord.Color.blue()
         )
         embed.set_footer(text='Use /pomodoro to start a new session!')
@@ -257,57 +280,79 @@ class Pomodoro(commands.Cog):
         
         await interaction.response.send_message(f'⏭️ Skipped {current_phase} phase!', ephemeral=True)
 
-    async def _run_timer(self, user: discord.User, guild: discord.Guild, timer: PomodoroTimer):
-        """Main timer loop"""
-        try:
-            while timer.is_running:
-                time_left = timer.get_time_left()
-                
-                if time_left is None or time_left <= 0:
-                    # Timer finished
-                    if timer.is_break:
-                        # Break ended, start work
-                        embed = discord.Embed(
-                            title='✅ Break Time Over!',
-                            description=f'Time to get back to work! 💪',
-                            color=discord.Color.green()
-                        )
-                        embed.add_field(name='Next Session', value=f'#{timer.current_session + 1}', inline=True)
-                        embed.set_footer(text='Ready to focus?')
-                        
-                        try:
-                            await user.send(embed=embed)
-                        except:
-                            pass
-                            
-                        timer.start_work()
-                        
-                    else:
-                        # Work ended, start break
-                        is_long_break = timer.start_break()
-                        break_type = 'Long' if is_long_break else 'Short'
-                        duration = timer.long_break if is_long_break else timer.short_break
-                        
-                        embed = discord.Embed(
-                            title='🎉 Work Session Complete!',
-                            description=f'Great job! Take a {break_type.lower()} break.',
-                            color=discord.Color.gold()
-                        )
-                        embed.add_field(name='Sessions Completed', value=f'{timer.current_session}', inline=True)
-                        embed.add_field(name='Break Duration', value=f'{duration} minutes', inline=True)
-                        embed.set_footer(text=f'{break_type} Break • Relax and recharge!')
-                        
-                        try:
-                            await user.send(embed=embed)
-                        except:
-                            pass
-                            
-                await asyncio.sleep(1)
-                
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            print(f'Timer error: {e}')
+    @app_commands.command(name='pomodoro-focusing', description='View all users currently focusing')
+    async def pomodoro_focusing(self, interaction: discord.Interaction):
+        focusing_users = []
+        
+        for timer in self.active_timers.values():
+            if timer.guild_id == interaction.guild.id and timer.is_running and not timer.is_break:
+                try:
+                    user = await self.bot.fetch_user(timer.user_id)
+                    time_left = timer.get_time_left()
+                    minutes = time_left // 60
+                    seconds = time_left % 60
+                    focusing_users.append((user, timer, minutes, seconds))
+                except:
+                    continue
+        
+        if not focusing_users:
+            await interaction.response.send_message('🍅 No one is focusing right now!', ephemeral=True)
+            return
+        
+        embed = discord.Embed(
+            title='🍅 Currently Focusing',
+            description=f'{len(focusing_users)} member(s) are in focus mode',
+            color=discord.Color.red()
+        )
+        
+        for user, timer, minutes, seconds in focusing_users:
+            embed.add_field(
+                name=f'🔴 {user.name}',
+                value=f'Session #{timer.current_session} • {minutes}m {seconds}s left',
+                inline=False
+            )
+        
+        embed.set_footer(text='Keep up the great work! 💪')
+        
+        await interaction.response.send_message(embed=embed)
+
+    @app_commands.command(name='pomodoro-onbreak', description='View all users currently on break')
+    async def pomodoro_onbreak(self, interaction: discord.Interaction):
+        break_users = []
+        
+        for timer in self.active_timers.values():
+            if timer.guild_id == interaction.guild.id and timer.is_running and timer.is_break:
+                try:
+                    user = await self.bot.fetch_user(timer.user_id)
+                    time_left = timer.get_time_left()
+                    minutes = time_left // 60
+                    seconds = time_left % 60
+                    is_long = (timer.current_session % timer.sessions_until_long) == 0
+                    break_users.append((user, timer, minutes, seconds, is_long))
+                except:
+                    continue
+        
+        if not break_users:
+            await interaction.response.send_message('☕ No one is on break right now!', ephemeral=True)
+            return
+        
+        embed = discord.Embed(
+            title='☕ Currently On Break',
+            description=f'{len(break_users)} member(s) are taking a break',
+            color=discord.Color.orange()
+        )
+        
+        for user, timer, minutes, seconds, is_long in break_users:
+            break_type = '🌙 Long Break' if is_long else '☕ Short Break'
+            embed.add_field(
+                name=f'{user.name}',
+                value=f'{break_type} • {minutes}m {seconds}s left',
+                inline=False
+            )
+        
+        embed.set_footer(text='Enjoy your rest! 😊')
+        
+        await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name='pomodoro-leaderboard', description='View Pomodoro leaderboard')
     async def pomodoro_leaderboard(self, interaction: discord.Interaction):
@@ -379,12 +424,14 @@ class Pomodoro(commands.Cog):
         embed.add_field(
             name='💻 Commands',
             value=(
-                '`/pomodoro` - Start timer (customize times!)\n'
+                '`/pomodoro` - Start timer with live updates\n'
                 '`/pomodoro-status` - Check current timer\n'
                 '`/pomodoro-pause` - Pause timer\n'
                 '`/pomodoro-resume` - Resume timer\n'
                 '`/pomodoro-skip` - Skip to next phase\n'
-                '`/pomodoro-stop` - Stop timer\n'
+                '`/pomodoro-stop` - Stop timer completely\n'
+                '`/pomodoro-focusing` - See who\'s focusing\n'
+                '`/pomodoro-onbreak` - See who\'s on break\n'
                 '`/pomodoro-leaderboard` - View rankings'
             ),
             inline=False
@@ -413,6 +460,109 @@ class Pomodoro(commands.Cog):
         embed.set_footer(text='Stay focused and productive! 🚀')
         
         await interaction.response.send_message(embed=embed)
+
+    def _create_timer_embed(self, timer: PomodoroTimer, user: discord.User) -> discord.Embed:
+        """Create a live timer embed"""
+        time_left = timer.get_time_left() or 0
+        minutes = time_left // 60
+        seconds = time_left % 60
+        
+        status = 'Break Time ☕' if timer.is_break else 'Focus Time 🍅'
+        color = discord.Color.orange() if timer.is_break else discord.Color.red()
+        
+        embed = discord.Embed(
+            title=f'{status}',
+            description=f'**{user.name}** - Session #{timer.current_session}',
+            color=color
+        )
+        
+        # Progress bar
+        total_seconds = (timer.long_break if timer.is_break and (timer.current_session % timer.sessions_until_long) == 0 
+                        else timer.short_break if timer.is_break else timer.work_time) * 60
+        progress = int((1 - time_left / total_seconds) * 20)
+        bar = '█' * progress + '░' * (20 - progress)
+        
+        embed.add_field(
+            name='⏱️ Time Remaining',
+            value=f'```{minutes:02d}:{seconds:02d}```\n{bar}',
+            inline=False
+        )
+        
+        embed.set_footer(text='Updates every 5 seconds')
+        embed.timestamp = datetime.now()
+        
+        return embed
+
+    async def _run_timer(self, user: discord.User, guild: discord.Guild, timer: PomodoroTimer):
+        """Main timer loop with live updates"""
+        try:
+            last_update = datetime.now()
+            
+            while timer.is_running:
+                time_left = timer.get_time_left()
+                
+                # Update live message every 5 seconds
+                if timer.status_message and (datetime.now() - last_update).total_seconds() >= 5:
+                    try:
+                        updated_embed = self._create_timer_embed(timer, user)
+                        await timer.status_message.edit(embed=updated_embed)
+                        last_update = datetime.now()
+                    except:
+                        pass
+                
+                if time_left is None or time_left <= 0:
+                    # Timer finished
+                    if timer.is_break:
+                        # Break ended, start work
+                        embed = discord.Embed(
+                            title='✅ Break Time Over!',
+                            description=f'Time to get back to work! 💪',
+                            color=discord.Color.green()
+                        )
+                        embed.add_field(name='Next Session', value=f'#{timer.current_session + 1}', inline=True)
+                        embed.set_footer(text='Ready to focus?')
+                        
+                        try:
+                            await user.send(embed=embed)
+                        except:
+                            pass
+                            
+                        timer.start_work()
+                        
+                    else:
+                        # Work ended, start break
+                        is_long_break = timer.start_break()
+                        break_type = 'Long' if is_long_break else 'Short'
+                        duration = timer.long_break if is_long_break else timer.short_break
+                        
+                        embed = discord.Embed(
+                            title='🎉 Work Session Complete!',
+                            description=f'Great job! Take a {break_type.lower()} break.',
+                            color=discord.Color.gold()
+                        )
+                        embed.add_field(name='Sessions Completed', value=f'{timer.current_session}', inline=True)
+                        embed.add_field(name='Break Duration', value=f'{duration} minutes', inline=True)
+                        embed.set_footer(text=f'{break_type} Break • Relax and recharge!')
+                        
+                        try:
+                            await user.send(embed=embed)
+                        except:
+                            pass
+                    
+                    # Update live message immediately
+                    if timer.status_message:
+                        try:
+                            updated_embed = self._create_timer_embed(timer, user)
+                            await timer.status_message.edit(embed=updated_embed)
+                        except:
+                            pass
+                            
+                await asyncio.sleep(1)
+                
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            print(f'Timer error: {e}')
 
 
 async def setup(bot):
