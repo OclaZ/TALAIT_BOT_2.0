@@ -16,11 +16,12 @@ class PomodoroTimer:
         self.current_session = 0
         self.is_running = False
         self.is_break = False
-        self.task = None
+        self.timer_task = None
         self.end_time = None
         self.paused_time_left = None
         self.status_message = None
         self.status_message_channel = None
+        self.is_stopped = False
         
     def start_work(self):
         self.is_running = True
@@ -56,6 +57,9 @@ class PomodoroTimer:
         self.is_break = False
         self.paused_time_left = None
         self.end_time = None
+        self.is_stopped = True
+        if self.timer_task and not self.timer_task.done():
+            self.timer_task.cancel()
         
     def reset_sessions(self):
         self.current_session = 0
@@ -161,7 +165,8 @@ class Pomodoro(commands.Cog):
         timer.status_message_channel = interaction.channel
         
         # Start timer loop
-        asyncio.create_task(self._run_timer(interaction.user, interaction.guild, timer))
+        timer.timer_task = asyncio.create_task(self._run_timer(interaction.user, interaction.guild, timer))
+        timer.is_stopped = False
 
     @app_commands.command(name='pomodoro-status', description='Check your Pomodoro timer status')
     async def pomodoro_status(self, interaction: discord.Interaction):
@@ -232,7 +237,8 @@ class Pomodoro(commands.Cog):
         if timer.resume():
             await interaction.response.send_message('▶️ Pomodoro resumed!', ephemeral=True)
             # Restart timer loop
-            asyncio.create_task(self._run_timer(interaction.user, interaction.guild, timer))
+            timer.timer_task = asyncio.create_task(self._run_timer(interaction.user, interaction.guild, timer))
+            timer.is_stopped = False
         else:
             await interaction.response.send_message('❌ Timer is not paused!', ephemeral=True)
 
@@ -246,6 +252,9 @@ class Pomodoro(commands.Cog):
             
         sessions_completed = timer.current_session
         
+        # Stop the timer and cancel the task
+        timer.stop()
+        
         # Delete live timer message if it exists
         if timer.status_message:
             try:
@@ -258,7 +267,7 @@ class Pomodoro(commands.Cog):
         
         embed = discord.Embed(
             title='🛑 Pomodoro Stopped',
-            description=f'Timer stopped. You completed **{sessions_completed}** session(s).',
+            description=f'Timer completely stopped. You completed **{sessions_completed}** session(s).',
             color=discord.Color.blue()
         )
         embed.set_footer(text='Use /pomodoro to start a new session!')
@@ -498,7 +507,7 @@ class Pomodoro(commands.Cog):
         try:
             last_update = datetime.now()
             
-            while timer.is_running:
+            while timer.is_running and not timer.is_stopped:
                 time_left = timer.get_time_left()
                 
                 # Update live message every 5 seconds
@@ -511,6 +520,10 @@ class Pomodoro(commands.Cog):
                         pass
                 
                 if time_left is None or time_left <= 0:
+                    # Check if timer was stopped
+                    if timer.is_stopped:
+                        break
+                        
                     # Timer finished
                     if timer.is_break:
                         # Break ended, start work
@@ -526,6 +539,10 @@ class Pomodoro(commands.Cog):
                             await user.send(embed=embed)
                         except:
                             pass
+                        
+                        # Check again if stopped before starting new session
+                        if timer.is_stopped:
+                            break
                             
                         timer.start_work()
                         
@@ -550,17 +567,21 @@ class Pomodoro(commands.Cog):
                             pass
                     
                     # Update live message immediately
-                    if timer.status_message:
+                    if timer.status_message and not timer.is_stopped:
                         try:
                             updated_embed = self._create_timer_embed(timer, user)
                             await timer.status_message.edit(embed=updated_embed)
                         except:
                             pass
-                            
+                
+                # Check if stopped during sleep
+                if timer.is_stopped:
+                    break
+                    
                 await asyncio.sleep(1)
                 
         except asyncio.CancelledError:
-            pass
+            print(f'⏹️ Timer task cancelled for {user.name}')
         except Exception as e:
             print(f'Timer error: {e}')
 

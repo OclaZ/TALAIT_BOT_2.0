@@ -25,7 +25,7 @@ class Challenges(commands.Cog):
         title='Challenge title',
         description='Challenge description',
         difficulty='Difficulty level',
-        duration='Duration in hours before auto-close (default: 168 = 7 days)',
+        duration='Duration in minutes before auto-close (default: 30 min, max: 1440 = 24h)',
         language='Programming language (optional, defaults to Any Language)'
     )
     @app_commands.choices(
@@ -58,16 +58,16 @@ class Challenges(commands.Cog):
         title: str, 
         description: str, 
         difficulty: app_commands.Choice[str],
-        duration: int = 168,
+        duration: int = 30,
         language: app_commands.Choice[str] = None
     ):
         if not self.has_trainer_role(interaction):
             await interaction.response.send_message('❌ Only trainers can post challenges!', ephemeral=True)
             return
 
-        # Validate duration (1 hour to 30 days)
-        if not (1 <= duration <= 720):
-            await interaction.response.send_message('❌ Duration must be between 1-720 hours (1 hour to 30 days)!', ephemeral=True)
+        # Validate duration (1 minute to 24 hours = 1440 minutes)
+        if not (1 <= duration <= 1440):
+            await interaction.response.send_message('❌ Duration must be between 1-1440 minutes (1 min to 24 hours)!', ephemeral=True)
             return
 
         # Default to 'any' if no language specified
@@ -75,7 +75,7 @@ class Challenges(commands.Cog):
         lang_info = SUPPORTED_LANGUAGES.get(lang_key, SUPPORTED_LANGUAGES['any'])
 
         week_number = datetime.now().isocalendar()[1]
-        close_time = datetime.now() + timedelta(hours=duration)
+        close_time = datetime.now() + timedelta(minutes=duration)
         
         challenge_data = {
             'title': title,
@@ -86,7 +86,7 @@ class Challenges(commands.Cog):
             'posted_by': interaction.user.id,
             'posted_at': datetime.now().isoformat(),
             'close_time': close_time.isoformat(),
-            'duration_hours': duration,
+            'duration_minutes': duration,
             'status': 'active',
             'submissions': []
         }
@@ -163,13 +163,13 @@ class Challenges(commands.Cog):
         )
         self.auto_close_tasks[task_key] = task
         
-        print(f'✅ Challenge created in {interaction.guild.name}: {title} ({lang_info["name"]}, ID: {challenge_id}, closes in {duration}h)')
+        print(f'✅ Challenge created in {interaction.guild.name}: {title} ({lang_info["name"]}, ID: {challenge_id}, closes in {duration}m)')
 
-    async def _auto_close_challenge(self, guild: discord.Guild, channel: discord.TextChannel, challenge_id: int, duration_hours: int, lang_info: dict):
+    async def _auto_close_challenge(self, guild: discord.Guild, channel: discord.TextChannel, challenge_id: int, duration_minutes: float, lang_info: dict):
         """Automatically close challenge after specified duration"""
         try:
-            # Wait for the duration
-            await asyncio.sleep(duration_hours * 3600)
+            # Wait for the duration (convert minutes to seconds)
+            await asyncio.sleep(duration_minutes * 60)
             
             # Get challenge data
             challenge = self.data_manager.get_challenge_by_id(guild.id, challenge_id)
@@ -181,9 +181,19 @@ class Challenges(commands.Cog):
             self.data_manager.update_challenge(guild.id, challenge_id, {'status': 'closed'})
             
             # Send closure message
+            hours = int(duration_minutes // 60)
+            minutes = int(duration_minutes % 60)
+            
+            if hours > 0 and minutes > 0:
+                duration_text = f'{hours} hours {minutes} minutes'
+            elif hours > 0:
+                duration_text = f'{hours} hours'
+            else:
+                duration_text = f'{minutes} minutes'
+            
             embed = discord.Embed(
                 title='⏰ Challenge Auto-Closed!',
-                description=f"**{challenge['title']}** has automatically closed after {duration_hours} hours.",
+                description=f"**{challenge['title']}** has automatically closed after {duration_text}.",
                 color=discord.Color.red()
             )
             embed.add_field(name='Total Submissions', value=str(len(challenge.get('submissions', []))), inline=True)
@@ -246,14 +256,14 @@ class Challenges(commands.Cog):
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name='extendchallenge', description='Extend the auto-close time of active challenge')
-    @app_commands.describe(hours='Additional hours to extend (1-168)')
-    async def extend_challenge(self, interaction: discord.Interaction, hours: int):
+    @app_commands.describe(minutes='Additional minutes to extend (1-1440)')
+    async def extend_challenge(self, interaction: discord.Interaction, minutes: int):
         if not self.has_trainer_role(interaction):
             await interaction.response.send_message('❌ Only trainers!', ephemeral=True)
             return
 
-        if not (1 <= hours <= 168):
-            await interaction.response.send_message('❌ Extension must be 1-168 hours!', ephemeral=True)
+        if not (1 <= minutes <= 1440):
+            await interaction.response.send_message('❌ Extension must be 1-1440 minutes (1 min to 24 hours)!', ephemeral=True)
             return
 
         active_challenge = self.data_manager.get_active_challenge(interaction.guild.id)
@@ -269,17 +279,17 @@ class Challenges(commands.Cog):
 
         # Calculate new close time
         old_close_time = datetime.fromisoformat(active_challenge['close_time'])
-        new_close_time = old_close_time + timedelta(hours=hours)
-        new_duration_hours = active_challenge['duration_hours'] + hours
+        new_close_time = old_close_time + timedelta(minutes=minutes)
+        new_duration_minutes = active_challenge['duration_minutes'] + minutes
 
         # Update challenge
         self.data_manager.update_challenge(interaction.guild.id, active_challenge['id'], {
             'close_time': new_close_time.isoformat(),
-            'duration_hours': new_duration_hours
+            'duration_minutes': new_duration_minutes
         })
 
-        # Calculate remaining time
-        remaining_hours = (new_close_time - datetime.now()).total_seconds() / 3600
+        # Calculate remaining time in minutes
+        remaining_minutes = (new_close_time - datetime.now()).total_seconds() / 60
 
         # Start new auto-close task
         lang_key = active_challenge.get('language', 'any')
@@ -290,19 +300,39 @@ class Challenges(commands.Cog):
                 interaction.guild,
                 interaction.channel,
                 active_challenge['id'],
-                remaining_hours,
+                remaining_minutes,
                 lang_info
             )
         )
         self.auto_close_tasks[task_key] = task
 
+        hours_ext = minutes // 60
+        mins_ext = minutes % 60
+        
+        if hours_ext > 0 and mins_ext > 0:
+            ext_text = f'{hours_ext}h {mins_ext}m'
+        elif hours_ext > 0:
+            ext_text = f'{hours_ext}h'
+        else:
+            ext_text = f'{mins_ext}m'
+
+        remaining_hours = int(remaining_minutes // 60)
+        remaining_mins = int(remaining_minutes % 60)
+        
+        if remaining_hours > 0 and remaining_mins > 0:
+            remaining_text = f'{remaining_hours}h {remaining_mins}m'
+        elif remaining_hours > 0:
+            remaining_text = f'{remaining_hours}h'
+        else:
+            remaining_text = f'{remaining_mins}m'
+
         embed = discord.Embed(
             title='⏰ Challenge Extended!',
-            description=f"**{active_challenge['title']}** extended by {hours} hours.",
+            description=f"**{active_challenge['title']}** extended by {ext_text}.",
             color=discord.Color.green()
         )
         embed.add_field(name='New Close Time', value=new_close_time.strftime("%b %d at %I:%M %p"), inline=True)
-        embed.add_field(name='Time Remaining', value=f'{int(remaining_hours)}h', inline=True)
+        embed.add_field(name='Time Remaining', value=remaining_text, inline=True)
         embed.set_footer(text=interaction.guild.name)
 
         await interaction.response.send_message(embed=embed)
@@ -322,9 +352,9 @@ class Challenges(commands.Cog):
             await interaction.response.send_message('⏰ Challenge should be closed!', ephemeral=True)
             return
 
-        days = time_left.days
-        hours = time_left.seconds // 3600
-        minutes = (time_left.seconds % 3600) // 60
+        total_minutes = int(time_left.total_seconds() / 60)
+        hours = total_minutes // 60
+        minutes = total_minutes % 60
 
         lang_key = active_challenge.get('language', 'any')
         lang_info = SUPPORTED_LANGUAGES.get(lang_key, SUPPORTED_LANGUAGES['any'])
@@ -335,14 +365,14 @@ class Challenges(commands.Cog):
             color=discord.Color.blue()
         )
         
-        time_text = []
-        if days > 0:
-            time_text.append(f'{days}d')
-        if hours > 0:
-            time_text.append(f'{hours}h')
-        time_text.append(f'{minutes}m')
+        if hours > 0 and minutes > 0:
+            time_text = f'{hours}h {minutes}m'
+        elif hours > 0:
+            time_text = f'{hours}h'
+        else:
+            time_text = f'{minutes}m'
         
-        embed.add_field(name='⏱️ Time Left', value=' '.join(time_text), inline=True)
+        embed.add_field(name='⏱️ Time Left', value=time_text, inline=True)
         embed.add_field(name='Closes At', value=close_time.strftime("%b %d at %I:%M %p"), inline=True)
         embed.add_field(name='Submissions', value=str(len(active_challenge.get('submissions', []))), inline=True)
         embed.add_field(name='Language', value=f'{lang_info["emoji"]} {lang_info["name"]}', inline=True)
@@ -434,9 +464,17 @@ class Challenges(commands.Cog):
             close_time = datetime.fromisoformat(challenge['close_time'])
             time_left = close_time - datetime.now()
             if time_left.total_seconds() > 0:
-                days = time_left.days
-                hours = time_left.seconds // 3600
-                time_text = f'{days}d {hours}h' if days > 0 else f'{hours}h'
+                total_minutes = int(time_left.total_seconds() / 60)
+                hours = total_minutes // 60
+                minutes = total_minutes % 60
+                
+                if hours > 0 and minutes > 0:
+                    time_text = f'{hours}h {minutes}m'
+                elif hours > 0:
+                    time_text = f'{hours}h'
+                else:
+                    time_text = f'{minutes}m'
+                    
                 embed.add_field(name='⏰ Closes In', value=time_text, inline=True)
         
         if lang_key != 'any':
