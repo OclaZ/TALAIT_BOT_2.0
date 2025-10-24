@@ -310,21 +310,21 @@ class Challenges(commands.Cog):
         mins_ext = minutes % 60
         
         if hours_ext > 0 and mins_ext > 0:
-            ext_text = f'{hours_ext}h {mins_ext}m'
+            ext_text = f'{hours_ext}h {mins_ext}min'
         elif hours_ext > 0:
             ext_text = f'{hours_ext}h'
         else:
-            ext_text = f'{mins_ext}m'
+            ext_text = f'{mins_ext}min'
 
         remaining_hours = int(remaining_minutes // 60)
         remaining_mins = int(remaining_minutes % 60)
         
         if remaining_hours > 0 and remaining_mins > 0:
-            remaining_text = f'{remaining_hours}h {remaining_mins}m'
+            remaining_text = f'{remaining_hours}h {remaining_mins}min'
         elif remaining_hours > 0:
             remaining_text = f'{remaining_hours}h'
         else:
-            remaining_text = f'{remaining_mins}m'
+            remaining_text = f'{remaining_mins}min'
 
         embed = discord.Embed(
             title='⏰ Challenge Extended!',
@@ -366,11 +366,11 @@ class Challenges(commands.Cog):
         )
         
         if hours > 0 and minutes > 0:
-            time_text = f'{hours}h {minutes}m'
+            time_text = f'{hours}h {minutes}min'
         elif hours > 0:
             time_text = f'{hours}h'
         else:
-            time_text = f'{minutes}m'
+            time_text = f'{minutes}min'
         
         embed.add_field(name='⏱️ Time Left', value=time_text, inline=True)
         embed.add_field(name='Closes At', value=close_time.strftime("%b %d at %I:%M %p"), inline=True)
@@ -469,11 +469,11 @@ class Challenges(commands.Cog):
                 minutes = total_minutes % 60
                 
                 if hours > 0 and minutes > 0:
-                    time_text = f'{hours}h {minutes}m'
+                    time_text = f'{hours}h {minutes}min'
                 elif hours > 0:
                     time_text = f'{hours}h'
                 else:
-                    time_text = f'{minutes}m'
+                    time_text = f'{minutes}min'
                     
                 embed.add_field(name='⏰ Closes In', value=time_text, inline=True)
         
