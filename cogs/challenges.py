@@ -25,7 +25,7 @@ class Challenges(commands.Cog):
         title='Challenge title',
         description='Challenge description',
         difficulty='Difficulty level',
-        duration='Duration in minutes before auto-close (default: 30 min, max: 1440 = 24h)',
+        duration='Duration in MINUTES before auto-close (default: 30 min, max: 1440 = 24h)',
         language='Programming language (optional, defaults to Any Language)'
     )
     @app_commands.choices(
@@ -109,15 +109,21 @@ class Challenges(commands.Cog):
         embed.add_field(name='📅 Week', value=f'Week {week_number}', inline=True)
         embed.add_field(name='💻 Language', value=f'{lang_info["emoji"]} {lang_info["name"]}', inline=True)
         
-        # Show duration and close time
-        days = duration // 24
-        hours = duration % 24
-        duration_text = f'{days}d {hours}h' if days > 0 else f'{hours}h'
+        # Calculate and display duration properly in minutes
+        hours_display = duration // 60
+        mins_display = duration % 60
+        
+        if hours_display > 0 and mins_display > 0:
+            duration_display = f'{hours_display}h {mins_display}min'
+        elif hours_display > 0:
+            duration_display = f'{hours_display}h'
+        else:
+            duration_display = f'{mins_display}min'
         
         embed.add_field(
-            name='⏰ Auto-Close',
-            value=f'In {duration_text}\n{close_time.strftime("%b %d at %I:%M %p")}',
-            inline=True
+            name='⏰ Auto-Close Timer',
+            value=f'**In:** {duration_display}\n**At:** {close_time.strftime("%b %d at %I:%M %p")}',
+            inline=False
         )
         embed.add_field(name='👤 Posted by', value=interaction.user.mention, inline=True)
         
@@ -142,10 +148,10 @@ class Challenges(commands.Cog):
             inline=False
         )
         
-        embed.set_footer(text=f'{interaction.guild.name} • {datetime.now().strftime("%B %d, %Y")}')
+        embed.set_footer(text=f'{interaction.guild.name} • Duration: {duration} minutes')
         embed.timestamp = datetime.now()
 
-        challenge_message = await interaction.response.send_message(
+        await interaction.response.send_message(
             content='@everyone 🚨 **New Coding Challenge!**',
             embed=embed
         )
@@ -163,12 +169,13 @@ class Challenges(commands.Cog):
         )
         self.auto_close_tasks[task_key] = task
         
-        print(f'✅ Challenge created in {interaction.guild.name}: {title} ({lang_info["name"]}, ID: {challenge_id}, closes in {duration}m)')
+        print(f'✅ Challenge created: {title} (ID: {challenge_id}, closes in {duration} minutes)')
 
     async def _auto_close_challenge(self, guild: discord.Guild, channel: discord.TextChannel, challenge_id: int, duration_minutes: float, lang_info: dict):
-        """Automatically close challenge after specified duration"""
+        """Automatically close challenge after specified duration in MINUTES"""
         try:
             # Wait for the duration (convert minutes to seconds)
+            print(f'⏰ Challenge {challenge_id} will close in {duration_minutes} minutes')
             await asyncio.sleep(duration_minutes * 60)
             
             # Get challenge data
@@ -180,16 +187,16 @@ class Challenges(commands.Cog):
             # Close the challenge
             self.data_manager.update_challenge(guild.id, challenge_id, {'status': 'closed'})
             
-            # Send closure message
-            hours = int(duration_minutes // 60)
-            minutes = int(duration_minutes % 60)
+            # Format duration for message
+            hours_msg = int(duration_minutes // 60)
+            mins_msg = int(duration_minutes % 60)
             
-            if hours > 0 and minutes > 0:
-                duration_text = f'{hours} hours {minutes} minutes'
-            elif hours > 0:
-                duration_text = f'{hours} hours'
+            if hours_msg > 0 and mins_msg > 0:
+                duration_text = f'{hours_msg} hours and {mins_msg} minutes'
+            elif hours_msg > 0:
+                duration_text = f'{hours_msg} hours'
             else:
-                duration_text = f'{minutes} minutes'
+                duration_text = f'{mins_msg} minutes'
             
             embed = discord.Embed(
                 title='⏰ Challenge Auto-Closed!',
@@ -256,7 +263,7 @@ class Challenges(commands.Cog):
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name='extendchallenge', description='Extend the auto-close time of active challenge')
-    @app_commands.describe(minutes='Additional minutes to extend (1-1440)')
+    @app_commands.describe(minutes='Additional MINUTES to extend (1-1440)')
     async def extend_challenge(self, interaction: discord.Interaction, minutes: int):
         if not self.has_trainer_role(interaction):
             await interaction.response.send_message('❌ Only trainers!', ephemeral=True)
@@ -306,6 +313,7 @@ class Challenges(commands.Cog):
         )
         self.auto_close_tasks[task_key] = task
 
+        # Format extension display
         hours_ext = minutes // 60
         mins_ext = minutes % 60
         
@@ -316,6 +324,7 @@ class Challenges(commands.Cog):
         else:
             ext_text = f'{mins_ext}min'
 
+        # Format remaining time display
         remaining_hours = int(remaining_minutes // 60)
         remaining_mins = int(remaining_minutes % 60)
         
@@ -352,6 +361,7 @@ class Challenges(commands.Cog):
             await interaction.response.send_message('⏰ Challenge should be closed!', ephemeral=True)
             return
 
+        # Calculate time in minutes
         total_minutes = int(time_left.total_seconds() / 60)
         hours = total_minutes // 60
         minutes = total_minutes % 60
@@ -365,6 +375,7 @@ class Challenges(commands.Cog):
             color=discord.Color.blue()
         )
         
+        # Format time display
         if hours > 0 and minutes > 0:
             time_text = f'{hours}h {minutes}min'
         elif hours > 0:
@@ -379,7 +390,7 @@ class Challenges(commands.Cog):
         embed.add_field(name='Difficulty', value=active_challenge['difficulty'], inline=True)
         embed.add_field(name='Week', value=f"Week {active_challenge['week']}", inline=True)
         
-        embed.set_footer(text=interaction.guild.name)
+        embed.set_footer(text=f'{interaction.guild.name} • Total duration: {active_challenge["duration_minutes"]} minutes')
 
         await interaction.response.send_message(embed=embed)
 
