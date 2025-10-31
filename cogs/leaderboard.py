@@ -4,64 +4,73 @@ from discord import app_commands
 from datetime import datetime
 from collections import defaultdict
 from utils.constants import XP_VALUES
+from utils.logger import get_logger
+
+logger = get_logger("cogs.leaderboard")
 
 class Leaderboard(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.data_manager = bot.data_manager
+        logger.info("Leaderboard cog initialized")
 
     @app_commands.command(name='addxp', description='Add XP to a user')
     @app_commands.describe(user='The user to add XP to', position='Position or participation (1st, 2nd, 3rd, participation)', week='Week number (optional, defaults to current week)')
     async def add_xp(self, interaction: discord.Interaction, user: discord.Member, position: str, week: int = None):
         allowed_roles = ['formateur', 'admin', 'moderator']
         if not any(role.name.lower() in allowed_roles for role in interaction.user.roles):
+            logger.warning(f"Unauthorized addxp attempt | User: {interaction.user.name} | Guild: {interaction.guild.name}")
             await interaction.response.send_message('❌ Only trainers can use this!', ephemeral=True)
             return
-        
+
         position = position.lower()
         if position not in XP_VALUES:
             await interaction.response.send_message(f'❌ Invalid position. Use: 1st, 2nd, 3rd, or participation', ephemeral=True)
             return
-        
+
         if week is None:
             week = datetime.now().isocalendar()[1]
-        
+
         week_key = f"week_{week}"
         xp_amount = XP_VALUES[position]
-        
+
         self.data_manager.ensure_user(interaction.guild.id, user.id, user.name)
         self.data_manager.add_xp(interaction.guild.id, user.id, xp_amount, week_key)
-        
+
         user_data = self.data_manager.get_user(interaction.guild.id, user.id)
-        
+
+        logger.info(f"/addxp | User: {user.name} | Position: {position} | XP: +{xp_amount} | Week: {week} | By: {interaction.user.name} | Guild: {interaction.guild.name}")
+
         embed = discord.Embed(title='✅ XP Added!', description=f'{user.mention} received **{xp_amount} XP** for **{position}**!', color=discord.Color.green())
         embed.add_field(name='Current XP', value=f"{user_data['xp']} XP", inline=True)
         embed.add_field(name='Week', value=f"Week {week}", inline=True)
         embed.set_footer(text=f'Server: {interaction.guild.name}')
-        
+
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name='leaderboard', description='View the current monthly leaderboard')
     async def leaderboard_cmd(self, interaction: discord.Interaction):
         leaderboard = self.data_manager.get_leaderboard(interaction.guild.id)
-        
+
         if not leaderboard:
             await interaction.response.send_message('📊 The leaderboard is empty!')
             return
-        
+
         sorted_users = sorted(leaderboard.items(), key=lambda x: x[1]['xp'], reverse=True)
         month_key = self.data_manager.get_month_key()
-        
+
+        logger.info(f"/leaderboard | User: {interaction.user.name} | Total users: {len(sorted_users)} | Guild: {interaction.guild.name}")
+
         embed = discord.Embed(title=f'🏆 {interaction.guild.name} Leaderboard', description=f'**{month_key}**', color=discord.Color.gold())
-        
+
         medals = ['🥇', '🥈', '🥉']
-        
+
         for idx, (user_id, data) in enumerate(sorted_users[:10]):
             medal = medals[idx] if idx < 3 else f'**{idx + 1}.**'
             username = data['username']
             xp = data['xp']
             embed.add_field(name=f'{medal} {username}', value=f'{xp} XP', inline=False)
-        
+
         embed.set_footer(text=f'{interaction.guild.name} • Monthly Rankings')
         await interaction.response.send_message(embed=embed)
 

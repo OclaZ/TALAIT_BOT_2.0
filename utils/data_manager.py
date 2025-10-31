@@ -2,26 +2,40 @@ import json
 import os
 from datetime import datetime
 from utils.constants import DATA_DIR, LEADERBOARD_FILE, HALL_OF_FAME_FILE, CHALLENGES_FILE
+from utils.logger import get_logger
+
+logger = get_logger("data_manager")
 
 class DataManager:
     def __init__(self):
         self.data_dir = DATA_DIR
         os.makedirs(self.data_dir, exist_ok=True)
         self.server_data = {}
+        logger.info(f"DataManager initialized | Data directory: {self.data_dir}")
     
     def _get_server_dir(self, guild_id: int) -> str:
         server_dir = os.path.join(self.data_dir, f'server_{guild_id}')
-        os.makedirs(server_dir, exist_ok=True)
+        if not os.path.exists(server_dir):
+            os.makedirs(server_dir, exist_ok=True)
+            logger.debug(f"Created server directory | Guild: {guild_id}")
         return server_dir
     
     def _load_server_data(self, guild_id: int, filename: str):
         server_dir = self._get_server_dir(guild_id)
         filepath = os.path.join(server_dir, filename)
-        
-        if os.path.exists(filepath):
-            with open(filepath, 'r') as f:
-                return json.load(f)
-        
+
+        try:
+            if os.path.exists(filepath):
+                with open(filepath, 'r') as f:
+                    data = json.load(f)
+                    logger.debug(f"Loaded {filename} | Guild: {guild_id}")
+                    return data
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON decode error in {filename} | Guild: {guild_id} | Error: {e}")
+        except Exception as e:
+            logger.error(f"Error loading {filename} | Guild: {guild_id} | Error: {e}")
+
+        logger.debug(f"File not found or error, returning empty data | {filename} | Guild: {guild_id}")
         if filename == CHALLENGES_FILE:
             return []
         return {}
@@ -29,9 +43,13 @@ class DataManager:
     def _save_server_data(self, guild_id: int, filename: str, data):
         server_dir = self._get_server_dir(guild_id)
         filepath = os.path.join(server_dir, filename)
-        
-        with open(filepath, 'w') as f:
-            json.dump(data, f, indent=4)
+
+        try:
+            with open(filepath, 'w') as f:
+                json.dump(data, f, indent=4)
+            logger.debug(f"Saved {filename} | Guild: {guild_id}")
+        except Exception as e:
+            logger.error(f"Error saving {filename} | Guild: {guild_id} | Error: {e}")
     
     def get_month_key(self):
         now = datetime.now()
@@ -57,15 +75,16 @@ class DataManager:
     def add_xp(self, guild_id: int, user_id: int, amount: int, week_key: str):
         leaderboard = self._load_server_data(guild_id, LEADERBOARD_FILE)
         user_id = str(user_id)
-        
+
         leaderboard[user_id]['xp'] += amount
         leaderboard[user_id]['total_xp'] += amount
-        
+
         if week_key not in leaderboard[user_id]['weekly_xp']:
             leaderboard[user_id]['weekly_xp'][week_key] = 0
         leaderboard[user_id]['weekly_xp'][week_key] += amount
-        
+
         self._save_server_data(guild_id, LEADERBOARD_FILE, leaderboard)
+        logger.info(f"Added {amount} XP | User: {leaderboard[user_id]['username']} | Total: {leaderboard[user_id]['xp']} | Guild: {guild_id}")
     
     def remove_xp(self, guild_id: int, user_id: int, amount: int):
         leaderboard = self._load_server_data(guild_id, LEADERBOARD_FILE)
@@ -113,15 +132,17 @@ class DataManager:
         month_key = self.get_month_key()
         leaderboard = self._load_server_data(guild_id, LEADERBOARD_FILE)
         hall_of_fame = self._load_server_data(guild_id, HALL_OF_FAME_FILE)
-        
+
         leaderboard_data = {k: v for k, v in leaderboard.items() if k != 'tickets'}
+        user_count = len(leaderboard_data)
         hall_of_fame[month_key] = dict(leaderboard_data)
         self._save_server_data(guild_id, HALL_OF_FAME_FILE, hall_of_fame)
-        
+
         for user_id in leaderboard_data:
             leaderboard[user_id]['xp'] = 0
-        
+
         self._save_server_data(guild_id, LEADERBOARD_FILE, leaderboard)
+        logger.info(f"Monthly leaderboard reset | Month: {month_key} | Users: {user_count} | Guild: {guild_id}")
     
     def create_challenge(self, guild_id: int, challenge_data: dict):
         challenges = self._load_server_data(guild_id, CHALLENGES_FILE)
@@ -130,6 +151,7 @@ class DataManager:
         challenge_data['guild_id'] = guild_id
         challenges.append(challenge_data)
         self._save_server_data(guild_id, CHALLENGES_FILE, challenges)
+        logger.info(f"Challenge created | ID: {challenge_id} | Difficulty: {challenge_data.get('difficulty', 'N/A')} | Guild: {guild_id}")
         return challenge_id
     
     def update_challenge(self, guild_id: int, challenge_id: int, updates: dict):

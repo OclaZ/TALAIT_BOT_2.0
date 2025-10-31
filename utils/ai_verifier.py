@@ -1,6 +1,9 @@
 import google.generativeai as genai
 import os
 from typing import Dict
+from utils.logger import get_logger
+
+logger = get_logger("ai_verifier")
 
 class AIVerifier:
     def __init__(self):
@@ -11,19 +14,21 @@ class AIVerifier:
                 # Use the correct model name for 2024/2025
                 self.model = genai.GenerativeModel('gemini-2.0-flash-exp')
                 self.enabled = True
-                print('✅ AI Verifier enabled with Gemini 2.0 Flash')
+                logger.info('✅ AI Verifier enabled with Gemini 2.0 Flash')
             except Exception as e:
-                print(f'⚠️ Could not initialize Gemini: {e}')
+                logger.error(f'⚠️ Could not initialize Gemini: {e}')
                 self.enabled = False
         else:
             self.enabled = False
-            print('⚠️ AI Verifier disabled - no GEMINI_API_KEY')
+            logger.warning('⚠️ AI Verifier disabled - no GEMINI_API_KEY')
     
     def verify_solution(self, challenge_title: str, challenge_description: str, challenge_difficulty: str, submitted_code: str, language: str = 'python') -> Dict:
         if not self.enabled:
+            logger.debug("AI verification disabled, using basic verification")
             return self._basic_verification(submitted_code)
-        
+
         try:
+            logger.info(f"AI verification started | Challenge: {challenge_title} | Language: {language}")
             prompt = f"""You are a code review expert. Analyze if this code solves the given challenge.
 
 CHALLENGE: {challenge_title}
@@ -56,11 +61,11 @@ Be strict: Only say YES if the code actually solves the challenge correctly."""
 
             response = self.model.generate_content(prompt)
             result = self._parse_ai_response(response.text)
-            print(f"✅ AI: Solves={result['solves_challenge']}, Score={result['overall_score']}")
+            logger.info(f"✅ AI verification complete | Challenge: {challenge_title} | Solves: {result['solves_challenge']} | Score: {result['overall_score']}")
             return result
             
         except Exception as e:
-            print(f'❌ AI Error: {str(e)[:150]}')
+            logger.error(f'❌ AI verification failed | Challenge: {challenge_title} | Error: {str(e)[:150]}')
             return self._basic_verification(submitted_code)
     
     def _parse_ai_response(self, text: str) -> Dict:

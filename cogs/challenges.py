@@ -3,18 +3,24 @@ from discord.ext import commands
 from discord import app_commands
 from datetime import datetime, timedelta
 from utils.constants import SUPPORTED_LANGUAGES
+from utils.logger import get_logger
 import asyncio
+
+logger = get_logger("cogs.challenges")
 
 class Challenges(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.data_manager = bot.data_manager
         self.auto_close_tasks = {}
+        logger.info("Challenges cog initialized")
 
     def cog_unload(self):
         """Cancel all auto-close tasks when cog unloads"""
+        task_count = len(self.auto_close_tasks)
         for task in self.auto_close_tasks.values():
             task.cancel()
+        logger.info(f"Challenges cog unloaded | Cancelled {task_count} auto-close tasks")
 
     def has_trainer_role(self, interaction: discord.Interaction):
         allowed_roles = ['formateur', 'admin', 'moderator']
@@ -62,6 +68,7 @@ class Challenges(commands.Cog):
         language: app_commands.Choice[str] = None
     ):
         if not self.has_trainer_role(interaction):
+            logger.warning(f"Unauthorized postchallenge attempt | User: {interaction.user.name} | Guild: {interaction.guild.name}")
             await interaction.response.send_message('❌ Only trainers can post challenges!', ephemeral=True)
             return
 
@@ -76,7 +83,7 @@ class Challenges(commands.Cog):
 
         week_number = datetime.now().isocalendar()[1]
         close_time = datetime.now() + timedelta(minutes=duration)
-        
+
         challenge_data = {
             'title': title,
             'description': description,
@@ -92,6 +99,8 @@ class Challenges(commands.Cog):
         }
 
         challenge_id = self.data_manager.create_challenge(interaction.guild.id, challenge_data)
+
+        logger.info(f"/postchallenge | ID: {challenge_id} | Title: {title} | Difficulty: {difficulty.value} | Duration: {duration}min | Language: {lang_info['name']} | By: {interaction.user.name} | Guild: {interaction.guild.name}")
 
         color_map = {
             'Easy': discord.Color.green(), 
@@ -175,17 +184,19 @@ class Challenges(commands.Cog):
         """Automatically close challenge after specified duration in MINUTES"""
         try:
             # Wait for the duration (convert minutes to seconds)
-            print(f'⏰ Challenge {challenge_id} will close in {duration_minutes} minutes')
+            logger.info(f'⏰ Auto-close timer started | Challenge ID: {challenge_id} | Duration: {duration_minutes}min | Guild: {guild.name}')
             await asyncio.sleep(duration_minutes * 60)
-            
+
             # Get challenge data
             challenge = self.data_manager.get_challenge_by_id(guild.id, challenge_id)
-            
+
             if not challenge or challenge['status'] != 'active':
+                logger.debug(f'Auto-close skipped (already closed or not found) | Challenge ID: {challenge_id} | Guild: {guild.name}')
                 return
-            
+
             # Close the challenge
             self.data_manager.update_challenge(guild.id, challenge_id, {'status': 'closed'})
+            logger.info(f'✅ Challenge auto-closed | ID: {challenge_id} | Title: {challenge["title"]} | Submissions: {len(challenge.get("submissions", []))} | Guild: {guild.name}')
             
             # Format duration for message
             hours_msg = int(duration_minutes // 60)

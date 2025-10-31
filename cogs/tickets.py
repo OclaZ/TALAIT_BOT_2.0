@@ -6,12 +6,16 @@ from utils.constants import ALLOWED_ROLES
 from utils.code_analyzer import CodeAnalyzer
 from utils.auto_xp import AutoXPCalculator
 from utils.ai_verifier import AIVerifier
+from utils.logger import get_logger
 import traceback
+
+logger = get_logger("cogs.tickets")
 
 class Tickets(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.data_manager = bot.data_manager
+        logger.info("Tickets cog initialized")
 
     @app_commands.command(name='submit', description='Create a private ticket to submit your solution')
     async def create_submission_ticket(self, interaction: discord.Interaction):

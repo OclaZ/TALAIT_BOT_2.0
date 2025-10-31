@@ -27,6 +27,11 @@ wheels/
 data/
 *.json
 
+# Log files
+logs/*.log
+logs/*.log.*
+!logs/.gitkeep
+
 # IDE
 .vscode/
 .idea/
@@ -39,3 +44,8 @@ data/
 Thumbs.db
 
 setup_guide.md
+
+benchmark.py
+requirements_benchmark.txt
+LOGGING_GUIDE.md
+LOGGING_SUMMARY.md

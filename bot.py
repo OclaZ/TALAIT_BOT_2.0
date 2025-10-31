@@ -3,11 +3,16 @@ from discord.ext import commands
 import os
 from dotenv import load_dotenv
 from utils.data_manager import DataManager
+from utils.logger import setup_logging, get_logger
 import traceback
 import asyncio
 
 # Load environment variables
 load_dotenv()
+
+# Initialize logging system
+setup_logging()
+logger = get_logger("bot")
 
 # Bot setup
 intents = discord.Intents.default()
@@ -23,40 +28,45 @@ bot.data_manager = data_manager
 
 @bot.event
 async def on_ready():
-    print('='*50)
-    print(f'✅ {bot.user} is now online!')
-    print(f'📊 Bot ID: {bot.user.id}')
-    print(f'🏠 Servers: {len(bot.guilds)}')
-    print('='*50)
-    
+    logger.info('='*50)
+    logger.info(f'✅ {bot.user} is now online!')
+    logger.info(f'📊 Bot ID: {bot.user.id}')
+    logger.info(f'🏠 Servers: {len(bot.guilds)}')
+
+    # Log server details
+    for guild in bot.guilds:
+        logger.info(f'  - {guild.name} (ID: {guild.id}, Members: {guild.member_count})')
+
+    logger.info('='*50)
+
     # Wait a bit for all cogs to fully load
     await asyncio.sleep(2)
-    
+
     try:
-        print('🔄 Syncing commands...')
-        
+        logger.info('🔄 Syncing commands...')
+
         # Check what commands are registered
         commands_before = bot.tree.get_commands()
-        print(f'📝 Commands in tree: {len(commands_before)}')
-        
+        logger.info(f'📝 Commands in tree: {len(commands_before)}')
+
         # Sync to Discord
         synced = await bot.tree.sync()
-        
-        print(f'\n✅ Synced {len(synced)} slash command(s) to Discord')
-        
+
+        logger.info(f'✅ Synced {len(synced)} slash command(s) to Discord')
+
         if len(synced) > 0:
-            print('\n📋 Available Commands:')
+            logger.info('📋 Available Commands:')
             for cmd in synced:
-                print(f'  /{cmd.name} - {cmd.description}')
+                logger.info(f'  /{cmd.name} - {cmd.description}')
         else:
-            print('⚠️ No commands synced!')
-            print('💡 Try restarting Discord app and waiting 2-3 minutes')
-        
-        print('='*50)
+            logger.warning('⚠️ No commands synced!')
+            logger.info('💡 Try restarting Discord app and waiting 2-3 minutes')
+
+        logger.info('='*50)
     except Exception as e:
-        print(f'❌ Error syncing commands: {e}')
-        traceback.print_exc()
-    
+        logger.error(f'❌ Error syncing commands: {e}')
+        logger.error(traceback.format_exc())
+
     # Set bot status
     await bot.change_presence(
         activity=discord.Activity(
@@ -64,10 +74,11 @@ async def on_ready():
             name="talAIt challenges | /help"
         )
     )
+    logger.info('Bot status set to: Watching talAIt challenges | /help')
 
 @bot.event
 async def on_guild_join(guild):
-    print(f'✅ Joined new server: {guild.name} (ID: {guild.id})')
+    logger.info(f'✅ Joined new server: {guild.name} (ID: {guild.id}, Members: {guild.member_count})')
 
 async def load_cogs():
     """Load all cog extensions"""
@@ -79,20 +90,21 @@ async def load_cogs():
         'cogs.pomodoro',
         'cogs.help',
     ]
-    
-    print('🔄 Loading cogs...')
+
+    logger.info('🔄 Loading cogs...')
     for cog in cogs:
         try:
             await bot.load_extension(cog)
-            print(f'✅ Loaded {cog}')
+            logger.info(f'✅ Loaded {cog}')
         except Exception as e:
-            print(f'❌ Failed to load {cog}: {e}')
-            traceback.print_exc()
-    
-    print('='*50)
+            logger.error(f'❌ Failed to load {cog}: {e}')
+            logger.error(traceback.format_exc())
+
+    logger.info('='*50)
 
 async def main():
     """Main function to start the bot"""
+    logger.info('🚀 Starting TALAIT_BOT...')
     async with bot:
         await load_cogs()
         await bot.start(os.getenv('DISCORD_TOKEN'))
@@ -102,7 +114,7 @@ if __name__ == '__main__':
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print('\n👋 Bot stopped by user')
+        logger.info('\n👋 Bot stopped by user')
     except Exception as e:
-        print(f'❌ Fatal error: {e}')
-        traceback.print_exc()
+        logger.critical(f'❌ Fatal error: {e}')
+        logger.critical(traceback.format_exc())

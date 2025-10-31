@@ -4,6 +4,9 @@ from discord import app_commands
 import asyncio
 from datetime import datetime, timedelta
 from typing import Dict, Optional
+from utils.logger import get_logger
+
+logger = get_logger("cogs.pomodoro")
 
 class PomodoroTimer:
     def __init__(self, user_id: int, guild_id: int):
@@ -80,6 +83,7 @@ class Pomodoro(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.active_timers: Dict[int, PomodoroTimer] = {}
+        logger.info("Pomodoro cog initialized")
         
     def _get_timer_key(self, user_id: int, guild_id: int) -> int:
         return hash(f"{guild_id}_{user_id}")
